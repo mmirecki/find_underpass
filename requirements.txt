@@ -1,0 +1,3 @@
+pyshp
+shapely
+rtree
