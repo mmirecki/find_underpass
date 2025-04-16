@@ -1,3 +1,8 @@
+
+import os
+import sys
+import csv
+from glob import glob
 from dataclasses import dataclass
 from itertools import chain
 from pathlib import Path
@@ -68,6 +73,7 @@ class Dataset:
     index: RTreeSpatialIndex
 
 
+
 def find_underpass(dataset: Dataset) -> list[GradeCrossing]:
     nr = 0
     result: list[GradeCrossing] = []
@@ -125,6 +131,18 @@ def find_underpass(dataset: Dataset) -> list[GradeCrossing]:
 
     return result
 
+def save_csv_result(result: Iterable[GradeCrossing], filename: str, base_path: str, known_bridges):
+    result_path = Path(f"{base_path}/{filename}.csv")
+    global_result_path = Path(f"{base_path}/results.csv")
+    with open(result_path, "a") as result_file, open(global_result_path, "a") as global_result_file:
+        for row in result:
+
+            if row.underpass.osm_id in known_bridges:
+                continue
+
+            result_file.write(f"{row.underpass.osm_id}, {row.underpass.geom.centroid.y}, {row.underpass.geom.centroid.y}, {row.overpass.osm_id}\n")
+            global_result_file.write(f"{row.underpass.osm_id}, {row.underpass.geom.centroid.y}, {row.underpass.geom.centroid.y}, {row.overpass.osm_id}\n")
+
 
 def save_result(result: Iterable[GradeCrossing], filename: Path):
     with shapefile.Writer(str(filename), shapeType=shapefile.POINT) as writer:
@@ -179,19 +197,70 @@ def load_data(folder: Path) -> Dataset:
     return Dataset(roads, road_index)
 
 
+def list_shp_directories(directory):
+    # List to hold the names of directories ending with .shp
+    shp_directories = []
+
+    # Iterate through the directory
+    for entry in os.listdir(directory):
+        # Create the full path
+        full_path = os.path.join(directory, entry)
+        # Check if it's a directory and ends with .shp
+        if os.path.isdir(full_path) and entry.endswith('.shp'):
+            shp_directories.append(entry)
+
+    return shp_directories
+
+
+def extract_ids_from_csv_files(directory):
+    ids = []  # Initialize an empty list to store IDs
+
+    # Use glob to find all CSV files in the specified directory
+    csv_files = glob(os.path.join(directory, '*'))
+
+    # Check if no CSV files exist
+    if not csv_files:
+        return ids  # Return empty list if no CSV files are found
+
+    # Iterate through each CSV file
+    for file_path in csv_files:
+        with open(file_path, mode='r', newline='') as csvfile:
+            csv_reader = csv.reader(csvfile)  # Create a CSV reader object
+
+            # Skip the header row
+            next(csv_reader)
+
+            # Iterate through each row in the CSV
+            for row in csv_reader:
+                if row:  # Check if the row is not empty
+                    ids.append(int(row[0]))  # Append the ID from the first column to the list
+
+    return ids
+
 def main():
-    #folder = Path(r'/Users/mcuprjak/Downloads/scotland-latest-free.shp')
-    folder = Path(r'/Users/marcin.mirecki/go/src/github.com/cuprjakm/find_underpass/shp/wales-latest-free.shp')
-    # folder = Path(r'/Users/mcuprjak/Downloads/england-latest-free.shp')
+
+    shp_folders = list_shp_directories("shp")
+    for shp_folder in shp_folders + ["results"]:
+        print(f"Preparing folder {shp_folder}")
+        with open("results/" + shp_folder + ".csv", "w") as file:
+            file.write("OSM_ID, LAT, LNG, OVERPASS_OSM_ID\n")
+
+    known_ids = extract_ids_from_csv_files("known_bridges")
 
     start_total = time()
-    dataset = load_data(folder)
-    start = time()
-    road_upass = find_underpass(dataset)
-    print(f'found {len(road_upass)} road underpass')
-    print(f'calculation time: {time() - start:.2f} s')
 
-    save_result(road_upass, folder / 'result.shp')
+    for shp_folder in shp_folders:
+        dataset = load_data(Path("shp/"+shp_folder))
+        start = time()
+        road_upass = find_underpass(dataset)
+        print(f'found {len(road_upass)} road underpass')
+        print(f'calculation time: {time() - start:.2f} s')
+
+        save_csv_result(road_upass, shp_folder, "results", known_ids)
+
+        # Save results into shp.
+        #save_result(road_upass, Path('/Users/marcin.mirecki/go/src/github.com/mmirecki/find_underpass/results/result.shp'))
+
     print(f'total time: {time() - start_total:.2f} s')
 
 
